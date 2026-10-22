@@ -1,0 +1,31 @@
+{{- if and .Values.metrics.enabled .Values.metrics.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "helm-charts-implementation.fullname" . }}
+  labels:
+    {{- include "helm-charts-implementation.labels" . | nindent 4 }}
+    {{- with .Values.metrics.prometheusRule.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: {{ include "helm-charts-implementation.fullname" . }}
+      rules:
+        - alert: NginxExporterTargetDown
+          expr: up{namespace="{{ .Release.Namespace }}", service="{{ include "helm-charts-implementation.fullname" . }}"} == 0
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: NGINX metrics exporter is unavailable
+            description: Prometheus has been unable to scrape the NGINX exporter for 5 minutes.
+        - alert: NginxUnavailable
+          expr: nginx_up{namespace="{{ .Release.Namespace }}", service="{{ include "helm-charts-implementation.fullname" . }}"} == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: NGINX is unavailable
+            description: The NGINX exporter reports that NGINX has been unavailable for 2 minutes.
+{{- end }}

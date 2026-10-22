@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "helm-charts-implementation.fullname" . }}
+  labels:
+    {{- include "helm-charts-implementation.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: TCP
+      name: http
+    {{- if .Values.metrics.enabled }}
+    - name: metrics
+      port: 9113
+      targetPort: metrics
+      protocol: TCP
+    {{- end }}
+  selector:
+    {{- include "helm-charts-implementation.selectorLabels" . | nindent 4 }}

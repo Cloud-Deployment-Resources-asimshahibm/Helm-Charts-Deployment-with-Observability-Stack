@@ -1,0 +1,18 @@
+The application has been deployed as {{ include "helm-charts-implementation.fullname" . }}.
+
+To access it from inside the cluster:
+
+  kubectl get service {{ include "helm-charts-implementation.fullname" . }}
+
+{{- if .Values.ingress.enabled }}
+The configured ingress host is:
+{{- range .Values.ingress.hosts }}
+  {{ .host }}
+{{- end }}
+{{- else }}
+To forward the service locally:
+
+  kubectl port-forward service/{{ include "helm-charts-implementation.fullname" . }} 8080:{{ .Values.service.port }}
+
+Then open http://127.0.0.1:8080.
+{{- end }}
