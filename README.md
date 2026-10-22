@@ -1,4 +1,4 @@
-# Helm Charts Implementation - Extended Observability
+# Helm Charts Implementation-Observability
 
 This repository contains a Helm chart with optional NGINX Prometheus exporter
 metrics, Prometheus Operator ServiceMonitor/PrometheusRule resources, and a
