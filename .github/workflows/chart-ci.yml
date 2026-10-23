@@ -35,10 +35,11 @@ jobs:
             --set metrics.enabled=true \
             --set metrics.serviceMonitor.enabled=true \
             --set metrics.prometheusRule.enabled=true \
+            --set metrics.grafanaDashboard.enabled=true \
             --set metrics.serviceMonitor.additionalLabels.release=kube-prometheus-stack \
             --set metrics.prometheusRule.additionalLabels.release=kube-prometheus-stack
 
-  kind-smoke-test:
+  kind-observability-test:
     runs-on: ubuntu-latest
     needs: chart
     steps:
@@ -53,37 +54,120 @@ jobs:
       - name: Create disposable Kubernetes cluster
         uses: helm/kind-action@v1.15.1
 
+      - name: Add Prometheus community chart repository
+        run: helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+
+      - name: Install Prometheus, Grafana, and Alertmanager
+        run: |
+          helm upgrade --install kube-prometheus-stack \
+            prometheus-community/kube-prometheus-stack \
+            --version 92.11.0 \
+            --namespace monitoring \
+            --create-namespace \
+            --values .github/ci/kube-prometheus-stack-values.yaml \
+            --wait \
+            --timeout 10m
+
       - name: Deploy chart with NGINX metrics
         run: |
           helm upgrade --install observability ./charts/helm-charts-implementation \
             --namespace observability \
             --create-namespace \
             --set metrics.enabled=true \
+            --set metrics.serviceMonitor.enabled=true \
+            --set metrics.prometheusRule.enabled=true \
+            --set metrics.grafanaDashboard.enabled=true \
+            --set metrics.serviceMonitor.additionalLabels.release=kube-prometheus-stack \
+            --set metrics.prometheusRule.additionalLabels.release=kube-prometheus-stack \
             --wait \
-            --timeout 5m
+            --timeout 10m
 
       - name: Verify rollout and chart connection test
         run: |
           kubectl rollout status deployment/observability-helm-charts-implementation \
             --namespace observability \
-            --timeout=5m
+            --timeout=10m
           helm test observability --namespace observability --logs
 
-      - name: Verify Prometheus exporter endpoint
+      - name: Verify Prometheus scrape, NGINX health, and alert rules
         run: |
-          kubectl port-forward \
-            --namespace observability \
-            service/observability-helm-charts-implementation \
-            9113:9113 > /tmp/helm-metrics-port-forward.log 2>&1 &
-          for attempt in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:9113/metrics > /tmp/nginx-metrics.txt; then
+          kubectl port-forward --address 127.0.0.1 \
+            --namespace monitoring \
+            service/kube-prometheus-stack-prometheus \
+            9090:9090 > /tmp/prometheus-port-forward.log 2>&1 &
+          port_forward_pid=$!
+          trap 'kill "$port_forward_pid" 2>/dev/null || true' EXIT
+
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:9090/-/ready; then
               break
             fi
             sleep 2
           done
-          grep -q '^nginx_up' /tmp/nginx-metrics.txt
-          grep -q '^nginx_connections_active' /tmp/nginx-metrics.txt
+          curl --fail --silent http://127.0.0.1:9090/-/ready
+
+          prometheus_query() {
+            curl --fail --silent --show-error --get \
+              http://127.0.0.1:9090/api/v1/query \
+              --data-urlencode "query=$1"
+          }
+
+          for attempt in $(seq 1 60); do
+            if prometheus_query 'up{nginx_namespace="observability",nginx_service="observability-helm-charts-implementation"}' \
+              | jq -e '.data.result | any(.value[1] == "1")' > /dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          prometheus_query 'up{nginx_namespace="observability",nginx_service="observability-helm-charts-implementation"}' \
+            | jq -e '.data.result | any(.value[1] == "1")'
+          prometheus_query 'nginx_up{nginx_namespace="observability",nginx_service="observability-helm-charts-implementation"}' \
+            | jq -e '.data.result | any(.value[1] == "1")'
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:9090/api/v1/rules?type=alert \
+              | jq -e '[.data.groups[].rules[].name] | index("NginxExporterTargetDown") != null and index("NginxUnavailable") != null' > /dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl --fail --silent --show-error \
+            'http://127.0.0.1:9090/api/v1/rules?type=alert' \
+            | jq -e '[.data.groups[].rules[].name] | index("NginxExporterTargetDown") != null and index("NginxUnavailable") != null'
+
+      - name: Verify Grafana dashboard provisioning
+        run: |
+          kubectl port-forward --address 127.0.0.1 \
+            --namespace monitoring \
+            service/kube-prometheus-stack-grafana \
+            3000:80 > /tmp/grafana-port-forward.log 2>&1 &
+          port_forward_pid=$!
+          trap 'kill "$port_forward_pid" 2>/dev/null || true' EXIT
+
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3000/api/health > /dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          grafana_password="$(kubectl get secret kube-prometheus-stack-grafana \
+            --namespace monitoring \
+            --output jsonpath='{.data.admin-password}' | base64 --decode)"
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --user "admin:${grafana_password}" \
+              http://127.0.0.1:3000/api/dashboards/uid/nginx-observability \
+              | jq -e '.dashboard.uid == "nginx-observability"' > /dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl --fail --silent --show-error \
+            --user "admin:${grafana_password}" \
+            http://127.0.0.1:3000/api/dashboards/uid/nginx-observability \
+            | jq -e '.dashboard.uid == "nginx-observability"'
 
       - name: Show deployed resources
         if: always()
-        run: kubectl get all --namespace observability
+        run: |
+          kubectl get pods,services --namespace observability
+          kubectl get pods,services --namespace monitoring

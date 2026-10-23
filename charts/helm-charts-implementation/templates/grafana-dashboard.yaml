@@ -1,0 +1,65 @@
+{{- if and .Values.metrics.enabled .Values.metrics.grafanaDashboard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "helm-charts-implementation.fullname" . }}-nginx-dashboard
+  labels:
+    {{- include "helm-charts-implementation.labels" . | nindent 4 }}
+    grafana_dashboard: "1"
+data:
+  nginx-overview.json: |
+    {
+      "uid": "nginx-{{ .Release.Name }}",
+      "title": "NGINX - {{ .Release.Name }}",
+      "tags": ["nginx", "application"],
+      "schemaVersion": 39,
+      "refresh": "30s",
+      "time": {"from": "now-1h", "to": "now"},
+      "panels": [
+        {
+          "id": 1,
+          "title": "NGINX availability",
+          "type": "stat",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{
+            "expr": "nginx_up{nginx_namespace=\"{{ .Release.Namespace }}\",nginx_service=\"{{ include "helm-charts-implementation.fullname" . }}\"}",
+            "refId": "A"
+          }],
+          "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0}
+        },
+        {
+          "id": 2,
+          "title": "Active connections",
+          "type": "timeseries",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{
+            "expr": "nginx_connections_active{nginx_namespace=\"{{ .Release.Namespace }}\",nginx_service=\"{{ include "helm-charts-implementation.fullname" . }}\"}",
+            "refId": "A"
+          }],
+          "gridPos": {"h": 8, "w": 9, "x": 6, "y": 0}
+        },
+        {
+          "id": 3,
+          "title": "HTTP requests per second",
+          "type": "timeseries",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{
+            "expr": "rate(nginx_http_requests_total{nginx_namespace=\"{{ .Release.Namespace }}\",nginx_service=\"{{ include "helm-charts-implementation.fullname" . }}\"}[5m])",
+            "refId": "A"
+          }],
+          "gridPos": {"h": 8, "w": 9, "x": 15, "y": 0}
+        },
+        {
+          "id": 4,
+          "title": "Exporter scrape health",
+          "type": "stat",
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "targets": [{
+            "expr": "up{nginx_namespace=\"{{ .Release.Namespace }}\",nginx_service=\"{{ include "helm-charts-implementation.fullname" . }}\"}",
+            "refId": "A"
+          }],
+          "gridPos": {"h": 5, "w": 6, "x": 0, "y": 5}
+        }
+      ]
+    }
+{{- end }}

@@ -20,4 +20,11 @@ spec:
       path: /metrics
       interval: {{ .Values.metrics.serviceMonitor.interval }}
       scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout }}
+      relabelings:
+        - action: replace
+          targetLabel: nginx_namespace
+          replacement: {{ .Release.Namespace | quote }}
+        - action: replace
+          targetLabel: nginx_service
+          replacement: {{ include "helm-charts-implementation.fullname" . | quote }}
 {{- end }}

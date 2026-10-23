@@ -13,7 +13,10 @@ spec:
     - name: {{ include "helm-charts-implementation.fullname" . }}
       rules:
         - alert: NginxExporterTargetDown
-          expr: up{namespace="{{ .Release.Namespace }}", service="{{ include "helm-charts-implementation.fullname" . }}"} == 0
+          expr: |
+            (up{nginx_namespace="{{ .Release.Namespace }}", nginx_service="{{ include "helm-charts-implementation.fullname" . }}"} == 0)
+            or
+            absent(up{nginx_namespace="{{ .Release.Namespace }}", nginx_service="{{ include "helm-charts-implementation.fullname" . }}"})
           for: 5m
           labels:
             severity: warning
@@ -21,7 +24,7 @@ spec:
             summary: NGINX metrics exporter is unavailable
             description: Prometheus has been unable to scrape the NGINX exporter for 5 minutes.
         - alert: NginxUnavailable
-          expr: nginx_up{namespace="{{ .Release.Namespace }}", service="{{ include "helm-charts-implementation.fullname" . }}"} == 0
+          expr: nginx_up{nginx_namespace="{{ .Release.Namespace }}", nginx_service="{{ include "helm-charts-implementation.fullname" . }}"} == 0
           for: 2m
           labels:
             severity: critical

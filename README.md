@@ -47,12 +47,20 @@ localhost, adds the exporter container, and adds a `metrics` Service port.
 Use this integration with the bundled NGINX sample image; other application
 images need their own instrumentation or exporter.
 
+Set `metrics.grafanaDashboard.enabled: true` to create a Grafana dashboard
+ConfigMap for NGINX availability, active connections, request rate, and
+exporter scrape health. Grafana must have a dashboard sidecar configured to
+watch ConfigMaps labeled `grafana_dashboard: "1"`; the provided CI monitoring
+stack includes that configuration.
+
 For a Prometheus Operator installation, enable a `ServiceMonitor` and
 `PrometheusRule` as well:
 
 ```yaml
 metrics:
   enabled: true
+  grafanaDashboard:
+    enabled: true
   serviceMonitor:
     enabled: true
     additionalLabels:
@@ -66,8 +74,10 @@ metrics:
 
 The `release` label must match the label selector configured on your
 Prometheus installation. The ServiceMonitor and PrometheusRule CRDs must
-already exist; they are not installed by this chart. Rules alert when
-Prometheus cannot scrape the exporter or NGINX reports itself unavailable.
+already exist; they are not installed by this chart. Scrape relabelings attach
+stable `nginx_namespace` and `nginx_service` labels used by the alerts and
+dashboard. Rules alert when Prometheus cannot scrape the exporter (including
+when the target disappears) or NGINX reports itself unavailable.
 
 Render the optional observability resources before installing. The monitoring
 CRDs must already be installed in the cluster for these two resource kinds:
@@ -78,6 +88,7 @@ helm template demo charts/helm-charts-implementation \
   --set metrics.enabled=true \
   --set metrics.serviceMonitor.enabled=true \
   --set metrics.prometheusRule.enabled=true \
+  --set metrics.grafanaDashboard.enabled=true \
   --set metrics.serviceMonitor.additionalLabels.release=kube-prometheus-stack \
   --set metrics.prometheusRule.additionalLabels.release=kube-prometheus-stack
 ```
@@ -96,13 +107,18 @@ Promtail/Loki); configure alert routing in your Prometheus/Alertmanager stack.
 
 ## Standard Kubernetes cluster test
 
-Every push and pull request runs `.github/workflows/chart-ci.yml`. It lints and
-renders both the default chart and the optional Prometheus Operator resources,
-then creates an ephemeral Kubernetes cluster with kind, installs the chart
-with NGINX metrics enabled, waits for the Deployment, runs the Helm connection
-test, and queries the exporter's `/metrics` endpoint. This is a real
-Kubernetes deployment test on a disposable CI cluster; it does not deploy to
-your personal or production cluster.
+Every push and pull request runs `.github/workflows/chart-ci.yml`. The workflow
+lints and renders the chart, creates an ephemeral Kubernetes cluster with
+kind, and installs a pinned `kube-prometheus-stack` (Prometheus, Grafana, and
+Alertmanager) using the lean CI configuration in
+`.github/ci/kube-prometheus-stack-values.yaml`. It deploys the chart with
+metrics, ServiceMonitor, alert rules, and dashboard enabled, waits for the
+application rollout, and runs the Helm connection test. It then verifies
+Prometheus is scraping the exporter and reports NGINX as healthy, confirms
+both custom alert rules are loaded, and checks that Grafana has provisioned
+the NGINX dashboard. This is an end-to-end observability integration test on
+a disposable CI cluster; it does not deploy to your personal or production
+cluster.
 
 To run the same smoke test locally, install Docker Desktop (with its Linux
 container engine), kubectl, Helm, and kind, then run:
